@@ -18,11 +18,6 @@ jobs:
           go-version: 1.27.2
       - uses: olegtarasov/get-tag@v2.1
         id: tagName
-      - name: Release Docker Image
-        run: make push
-        env:
-          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
       - name: Release Binary
         run: make release
         env:
