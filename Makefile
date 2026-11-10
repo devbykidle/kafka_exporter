@@ -12,12 +12,19 @@ endif
 
 PREFIX                  ?= $(shell pwd)
 BIN_DIR                 ?= $(shell pwd)
-DOCKER_IMAGE_NAME       ?= kafka-exporter
+DOCKER_REGISTRY         ?= ghcr.io
+DOCKER_USERNAME         ?= $(shell git config --get remote.origin.url | sed -E 's#.*[:/]([^/]+)/[^/]+(\.git)?$$#\1#' | tr '[:upper:]' '[:lower:]')
+DOCKER_IMAGE_NAME       ?= kafka_exporter
+DOCKER_IMAGE            ?= $(DOCKER_REGISTRY)/$(shell echo '$(DOCKER_USERNAME)' | tr '[:upper:]' '[:lower:]')/$(DOCKER_IMAGE_NAME)
 DOCKER_IMAGE_TAG        ?= $(subst /,-,$(shell git rev-parse --abbrev-ref HEAD))
+DOCKER_BUILDER          ?= kafka-exporter-builder
 #TAG 					:= $(shell echo `if [ "$(TRAVIS_BRANCH)" = "master" ] || [ "$(TRAVIS_BRANCH)" = "" ] ; then echo "latest"; else echo $(TRAVIS_BRANCH) ; fi`)
 
 PUSHTAG                 ?= type=registry,push=true
 DOCKER_PLATFORMS        ?= linux/amd64,linux/s390x,linux/arm64,linux/ppc64le
+# Platforms that actually ship in the docker image, so the build context stays small.
+CROSSBUILD_PLATFORMS    ?= linux/(amd64|arm64|ppc64le|s390x)
+GIT_TAG_NAME            ?= $(shell git describe --tags --exact-match 2>/dev/null || echo latest)
 
 all: format build test
 
@@ -47,37 +54,41 @@ crossbuild: promu
 	@echo ">> crossbuilding binaries"
 	@$(PROMU) crossbuild --go=1.27
 
+crossbuild-docker: promu
+	@echo ">> crossbuilding binaries for $(DOCKER_PLATFORMS)"
+	@$(PROMU) crossbuild --go=1.27 --platforms '$(CROSSBUILD_PLATFORMS)'
+
 tarball: promu
 	@echo ">> building release tarball"
 	@$(PROMU) tarball --prefix $(PREFIX) $(BIN_DIR)
 
 docker: build
-	@echo ">> building docker image"
-	@docker build -t "$(DOCKER_IMAGE_NAME):$(DOCKER_IMAGE_TAG)" --build-arg BIN_DIR=. .
+	@echo ">> building docker image $(DOCKER_IMAGE):$(DOCKER_IMAGE_TAG)"
+	@docker build -t "$(DOCKER_IMAGE):$(DOCKER_IMAGE_TAG)" --build-arg BIN_DIR=. .
 
-push: crossbuild
-	@echo ">> building and pushing multi-arch docker images, $(DOCKER_USERNAME),$(DOCKER_IMAGE_NAME),$(GIT_TAG_NAME)"
-	@docker login -u $(DOCKER_USERNAME) -p $(DOCKER_PASSWORD)
-	@docker buildx create --use
-	@docker buildx build -t "$(DOCKER_USERNAME)/$(DOCKER_IMAGE_NAME):$(GIT_TAG_NAME)" \
+push: crossbuild-docker
+	@echo ">> building and pushing multi-arch docker image $(DOCKER_IMAGE):$(GIT_TAG_NAME)"
+	@if [ -n "$(DOCKER_PASSWORD)" ]; then \
+		echo "$(DOCKER_PASSWORD)" | docker login "$(DOCKER_REGISTRY)" -u "$(DOCKER_USERNAME)" --password-stdin; \
+	fi
+	@docker buildx inspect "$(DOCKER_BUILDER)" >/dev/null 2>&1 || docker buildx create --name "$(DOCKER_BUILDER)"
+	@docker buildx use "$(DOCKER_BUILDER)"
+	@docker buildx build -t "$(DOCKER_IMAGE):$(GIT_TAG_NAME)" \
 		--output "$(PUSHTAG)" \
 		--platform "$(DOCKER_PLATFORMS)" \
 		.
 
-release: promu github-release
-	@echo ">> pushing binary to github with ghr"
+tarballs: promu
+	@echo ">> building release tarballs from .build/"
 	@$(PROMU) crossbuild tarballs
+
+release: crossbuild tarballs
+	@echo ">> uploading release files to github"
 	@$(PROMU) release .tarballs
 
 promu:
 	@GOOS=$(UNAME_S) GOARCH=$(ARCH) $(GO) install github.com/prometheus/promu@v0.14.0
 PROMU=$(shell go env GOPATH)/bin/promu
-
-github-release:
-	@GOOS=$(shell uname -s | tr A-Z a-z) \
-		GOARCH=$(subst x86_64,amd64,$(patsubst i%86,386,$(shell uname -m))) \
-		$(GO) install github.com/github-release/github-release@v0.10.0
-	$(GO) mod tidy
 
 # Run go fmt against code
 .PHONY: fmt
@@ -140,4 +151,4 @@ STATICCHECK=$(shell which staticcheck)
 endif
 
 
-.PHONY: all style format build test vet tarball docker promu sec staticcheck
+.PHONY: all style format build test vet tarball tarballs docker push promu release sec staticcheck crossbuild crossbuild-docker

@@ -1,4 +1,34 @@
+# Build metadata is not needed inside the image.
+.git
+.gitignore
+.github
+.idea
+.travis.yml
+.golangci.yml
+
+# Sources are compiled outside of the image (promu crossbuild -> .build/).
+*.go
+go.mod
+go.sum
 vendor
-Dockerfile
-Makefile
+
+# Docs and assets.
 README.md
+LICENSE
+*.md
+*.json
+*.png
+*.jpg
+
+# Local tooling / deployment manifests.
+Makefile
+Dockerfile
+.dockerignore
+charts
+deploy
+dev
+
+# Build artifacts of the host, only .build/linux-<arch>/ and the
+# root binary produced by `promu build` are consumed.
+*.test
+*.out

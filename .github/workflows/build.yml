@@ -4,10 +4,18 @@ on:
   push:
     branches:
       - 'master'
+  workflow_dispatch:
+
+env:
+  DOCKER_REGISTRY: ghcr.io
+  DOCKER_IMAGE_NAME: kafka_exporter
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # push the image to GitHub Container Registry
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -15,9 +23,14 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version: 1.27.2
-      - name: Build Docker Image
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.DOCKER_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and Push Docker Image
         run: make push
         env:
-          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+          DOCKER_USERNAME: ${{ github.repository_owner }}
           GIT_TAG_NAME: latest
